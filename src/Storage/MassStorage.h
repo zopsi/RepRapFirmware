@@ -13,7 +13,7 @@
 struct FileInfo
 {
 	bool isDirectory;
-	char fileName[FILENAME_LENGTH];
+	char fileName[MaxFilenameLength];
 	uint32_t size;
 	time_t lastModified;
 };
@@ -46,6 +46,15 @@ public:
 	void CloseAllFiles();
 	unsigned int GetNumFreeFiles() const;
 	void Spin();
+
+	enum class InfoResult : uint8_t
+	{
+		badSlot = 0,
+		noCard = 1,
+		ok = 2
+	};
+
+	InfoResult GetCardInfo(size_t slot, uint64_t& capacity, uint64_t& freeSpace, uint32_t& speed);
 
 friend class Platform;
 friend class FileStore;
@@ -83,7 +92,7 @@ private:
 	SdCardInfo info[NumSdCards];
 
 	DIR findDir;
-	char combinedName[FILENAME_LENGTH + 1];
+	char combinedName[MaxFilenameLength + 1];
 	FileWriteBuffer *freeWriteBuffers;
 
 	FileStore files[MAX_FILES];

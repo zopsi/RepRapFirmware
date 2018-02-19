@@ -9,7 +9,9 @@
 #define HAS_CPU_TEMP_SENSOR		1
 #define HAS_HIGH_SPEED_SD		1
 #define HAS_SMART_DRIVERS		0
+#define HAS_STALL_DETECT		0
 #define HAS_VOLTAGE_MONITOR		0
+#define HAS_VREF_MONITOR		0
 #define ACTIVE_LOW_HEAT_ON		1
 
 constexpr size_t NumFirmwareUpdateModules = 1;
@@ -46,6 +48,9 @@ constexpr size_t NUM_SERIAL_CHANNELS = 3;			// The number of serial IO channels 
 #define SERIAL_MAIN_DEVICE SerialUSB
 #define SERIAL_AUX_DEVICE Serial
 #define SERIAL_AUX2_DEVICE Serial1
+
+#define I2C_IFACE	Wire1							// Which TWI channel we use
+#define I2C_IRQn	WIRE1_ISR_ID					// Which interrupt it uses
 
 // The numbers of entries in each array must correspond with the values of DRIVES, AXES, or HEATERS. Set values to NoPin to flag unavailability.
 
@@ -168,10 +173,12 @@ constexpr uint32_t IAP_FLASH_END = 0x000FFBFF;		// don't touch the last 1KB, it'
 #define NETWORK_TC_CHAN		(1)
 #define NETWORK_TC_IRQN		TC4_IRQn
 #define NETWORK_TC_HANDLER	TC4_Handler
+#define NETWORK_TC_ID		ID_TC4
 
 #define STEP_TC				(TC1)
 #define STEP_TC_CHAN		(0)
 #define STEP_TC_IRQN		TC3_IRQn
 #define STEP_TC_HANDLER		TC3_Handler
+#define STEP_TC_ID			ID_TC3
 
 #endif

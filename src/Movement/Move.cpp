@@ -43,7 +43,7 @@ void Move::Init()
 
 	currentDda = nullptr;
 	stepErrors = 0;
-	numLookaheadUnderruns = numPrepareUnderruns = 0;
+	numLookaheadUnderruns = numPrepareUnderruns = numLookaheadErrors = 0;
 
 	// Clear the transforms
 	SetIdentityTransform();
@@ -65,6 +65,7 @@ void Move::Init()
 	for (size_t i = 0; i < MaxExtruders; ++i)
 	{
 		extrusionAccumulators[i] = 0;
+		extruderNonPrinting[i] = false;
 		extrusionPending[i] = 0.0;
 	}
 
@@ -126,7 +127,7 @@ void Move::Spin()
 		{
 			if (reprap.Debug(moduleMove))
 			{
-				ddaRingCheckPointer->DebugPrint();
+				ddaRingCheckPointer->DebugPrintAll();
 			}
 			++stepErrors;
 			reprap.GetPlatform().LogError(ErrorCode::BadMove);
@@ -216,6 +217,7 @@ void Move::Spin()
 					{
 						AxisAndBedTransform(nextMove.coords, nextMove.xAxes, nextMove.yAxes, true);
 					}
+
 					if (ddaRingAddPointer->Init(nextMove, !IsRawMotorMove(nextMove.moveType)))
 					{
 						ddaRingAddPointer = ddaRingAddPointer->GetNext();
@@ -233,6 +235,7 @@ void Move::Spin()
 							lastStateChangeTime = now;
 						}
 					}
+
 #if 0	// see above
 					// Save the amount of extrusion not done
 					for (size_t drive = numAxes; drive < DRIVES; ++drive)
@@ -372,7 +375,7 @@ bool Move::IsRawMotorMove(uint8_t moveType) const
 // Return true if the specified point is accessible to the Z probe
 bool Move::IsAccessibleProbePoint(float x, float y) const
 {
-	const ZProbeParameters& params = reprap.GetPlatform().GetCurrentZProbeParameters();
+	const ZProbe& params = reprap.GetPlatform().GetCurrentZProbeParameters();
 	return kinematics->IsReachable(x - params.xOffset, y - params.yOffset, false);
 }
 
@@ -560,10 +563,10 @@ void Move::Diagnostics(MessageType mtype)
 {
 	Platform& p = reprap.GetPlatform();
 	p.Message(mtype, "=== Move ===\n");
-	p.MessageF(mtype, "MaxReps: %" PRIu32 ", StepErrors: %u, FreeDm: %d, MinFreeDm %d, MaxWait: %" PRIu32 "ms, Underruns: %u, %u\n",
-						DDA::maxReps, stepErrors, DriveMovement::NumFree(), DriveMovement::MinFree(), longestGcodeWaitInterval, numLookaheadUnderruns, numPrepareUnderruns);
+	p.MessageF(mtype, "MaxReps: %" PRIu32 ", StepErrors: %u, LaErrors: %u, FreeDm: %d, MinFreeDm %d, MaxWait: %" PRIu32 "ms, Underruns: %u, %u\n",
+						DDA::maxReps, stepErrors, numLookaheadErrors, DriveMovement::NumFree(), DriveMovement::MinFree(), longestGcodeWaitInterval, numLookaheadUnderruns, numPrepareUnderruns);
 	DDA::maxReps = 0;
-	numLookaheadUnderruns = numPrepareUnderruns = 0;
+	numLookaheadUnderruns = numPrepareUnderruns = numLookaheadErrors = 0;
 	longestGcodeWaitInterval = 0;
 	DriveMovement::ResetMinFree();
 
@@ -894,7 +897,7 @@ void Move::SetAxisCompensation(unsigned int axis, float tangent)
 // Calibrate or set the bed equation after probing, returning true if an error occurred
 // sParam is the value of the S parameter in the G30 command that provoked this call.
 // Caller already owns the GCode movement lock.
-bool Move::FinishedBedProbing(int sParam, StringRef& reply)
+bool Move::FinishedBedProbing(int sParam, const StringRef& reply)
 {
 	bool error = false;
 	const size_t numPoints = probePoints.NumberOfProbePoints();
@@ -968,6 +971,10 @@ void Move::CurrentMoveCompleted()
 	for (size_t drive = numAxes; drive < DRIVES; ++drive)
 	{
 		extrusionAccumulators[drive - numAxes] += currentDda->GetStepsTaken(drive);
+		if (currentDda->IsNonPrintingExtruderMove(drive))
+		{
+			extruderNonPrinting[drive - numAxes] = true;
+		}
 	}
 	currentDda = nullptr;
 
@@ -1096,7 +1103,9 @@ void Move::ResetExtruderPositions()
 }
 
 // Get the accumulated extruder motor steps taken by an extruder since the last call. Used by the filament monitoring code.
-int32_t Move::GetAccumulatedExtrusion(size_t extruder)
+// Returns the number of motor steps moves since the last call, and nonPrinting is true if we are currently executing an extruding but non-printing move
+// or we completed one since the last call.
+int32_t Move::GetAccumulatedExtrusion(size_t extruder, bool& nonPrinting)
 {
 	const size_t drive = extruder + reprap.GetGCodes().GetTotalAxes();
 	if (drive < DRIVES)
@@ -1104,12 +1113,27 @@ int32_t Move::GetAccumulatedExtrusion(size_t extruder)
 		const irqflags_t flags = cpu_irq_save();
 		const int32_t ret = extrusionAccumulators[extruder];
 		const DDA * const cdda = currentDda;						// capture volatile variable
-		const int32_t adjustment = (cdda != nullptr) ? cdda->GetStepsTaken(drive) : 0;
+		const int32_t adjustment = (cdda == nullptr) ? 0 : cdda->GetStepsTaken(drive);
+		if (adjustment == 0)
+		{
+			// Either there is no current move, or we are at the very start of this move, or it doesn't involve this extruder e.g. a travel move
+			nonPrinting = extruderNonPrinting[extruder];
+		}
+		else if (cdda->IsPrintingMove())
+		{
+			nonPrinting = extruderNonPrinting[extruder];
+			extruderNonPrinting[extruder] = false;
+		}
+		else
+		{
+			nonPrinting = true;
+		}
 		extrusionAccumulators[extruder] = -adjustment;
 		cpu_irq_restore(flags);
 		return ret + adjustment;
 	}
 
+	nonPrinting = true;
 	return 0.0;
 }
 
@@ -1146,7 +1170,7 @@ float Move::GetProbeCoordinates(int count, float& x, float& y, bool wantNozzlePo
 	y = probePoints.GetYCoord(count);
 	if (wantNozzlePosition)
 	{
-		const ZProbeParameters& rp = reprap.GetPlatform().GetCurrentZProbeParameters();
+		const ZProbe& rp = reprap.GetPlatform().GetCurrentZProbeParameters();
 		x -= rp.xOffset;
 		y -= rp.yOffset;
 	}
@@ -1204,7 +1228,7 @@ void Move::PrintCurrentDda() const
 {
 	if (currentDda != nullptr)
 	{
-		currentDda->DebugPrint();
+		currentDda->DebugPrintAll();
 	}
 }
 

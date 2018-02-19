@@ -70,7 +70,7 @@ public:
 	unsigned int GetNumberOfContiguousTools() const;
 
 	unsigned int GetProhibitedExtruderMovements(unsigned int extrusions, unsigned int retractions);
-	void PrintTool(int toolNumber, StringRef& reply) const;
+	void PrintTool(int toolNumber, const StringRef& reply) const;
 	void FlagTemperatureFault(int8_t dudHeater);
 	void ClearTemperatureFault(int8_t wasDudHeater);
 
@@ -86,6 +86,9 @@ public:
 #if SUPPORT_IOBITS
  	PortControl& GetPortControl() const;
 #endif
+#if SUPPORT_12864_LCD
+ 	Display& GetDisplay() const;
+#endif
 
 	void Tick();
 	bool SpinTimeoutImminent() const;
@@ -100,7 +103,7 @@ public:
 	OutputBuffer *GetFilesResponse(const char* dir, bool flagsDirs);
 	OutputBuffer *GetFilelistResponse(const char* dir);
 
-	void Beep(int freq, int ms);
+	void Beep(unsigned int freq, unsigned int ms);
 	void SetMessage(const char *msg);
 	void SetAlert(const char *msg, const char *title, int mode, float timeout, AxesBitmap controls);
 	void ClearAlert();
@@ -134,6 +137,10 @@ private:
  	PortControl *portControl;
 #endif
 
+#if SUPPORT_12864_LCD
+ 	Display *display;
+#endif
+
 	Tool* toolList;								// the tool list is sorted in order of increasing tool number
 	Tool* currentTool;
 	uint32_t lastWarningMillis;					// When we last sent a warning message for things that can happen very often
@@ -152,15 +159,15 @@ private:
 	bool resetting;
 	bool processingConfig;
 
-	char password[PASSWORD_LENGTH + 1];
-	char myName[MACHINE_NAME_LENGTH + 1];
+	String<PASSWORD_LENGTH> password;
+	String<MACHINE_NAME_LENGTH> myName;
 
-	int beepFrequency, beepDuration;
-	char message[MESSAGE_LENGTH + 1];
+	unsigned int beepFrequency, beepDuration;
+	char message[MaxMessageLength + 1];
 
 	// Message box data
 	bool displayMessageBox;
-	char boxMessage[MESSAGE_LENGTH + 1], boxTitle[MESSAGE_LENGTH + 1];
+	String<MaxMessageLength> boxMessage, boxTitle;
 	int boxMode;
 	uint32_t boxSeq;
 	uint32_t boxTimer, boxTimeout;
@@ -178,6 +185,10 @@ inline PrintMonitor& RepRap::GetPrintMonitor() const { return *printMonitor; }
 
 #if SUPPORT_IOBITS
 inline PortControl& RepRap::GetPortControl() const { return *portControl; }
+#endif
+
+#if SUPPORT_12864_LCD
+inline Display& RepRap::GetDisplay() const { return *display; }
 #endif
 
 inline bool RepRap::Debug(Module m) const { return debug & (1 << m); }

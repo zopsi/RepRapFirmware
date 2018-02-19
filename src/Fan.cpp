@@ -34,7 +34,7 @@ void Fan::Init(Pin p_pin, bool hwInverted)
 // Exceptions:
 // 1. Only process the S parameter unless other values were processed.
 // 2. Don't process the R parameter, but if it is present don't print the existing configuration.
-bool Fan::Configure(unsigned int mcode, int fanNum, GCodeBuffer& gb, StringRef& reply, bool& error)
+bool Fan::Configure(unsigned int mcode, int fanNum, GCodeBuffer& gb, const StringRef& reply, bool& error)
 {
 	if (!IsEnabled())
 	{
@@ -95,9 +95,9 @@ bool Fan::Configure(unsigned int mcode, int fanNum, GCodeBuffer& gb, StringRef& 
 		if (gb.Seen('H'))		// Set thermostatically-controlled heaters
 		{
 			seen = true;
-			long heaters[Heaters + MaxVirtualHeaters];
+			int32_t heaters[Heaters + MaxVirtualHeaters];		// signed because we use H-1 to disable thermostatic mode
 			size_t numH = ARRAY_SIZE(heaters);
-			gb.GetLongArray(heaters, numH);
+			gb.GetIntArray(heaters, numH, false);
 
 			// Note that M106 H-1 disables thermostatic mode. The following code implements that automatically.
 			heatersMonitored = 0;

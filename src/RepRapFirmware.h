@@ -55,11 +55,12 @@ enum Module : uint8_t
 	moduleDuetExpansion = 12,
 	moduleFilamentSensors = 13,
 	moduleWiFi = 14,
-	numModules = 15,				// make this one greater than the last module number
-	noModule = 15
+	moduleDisplay = 15,
+	numModules = 16,				// make this one greater than the last module number
+	noModule = 16
 };
 
-extern const char *moduleName[];
+extern const char * const moduleName[];
 
 // Warn of what's to come, so we can use pointers to classes without including the entire header files
 class Network;
@@ -81,12 +82,16 @@ class OutputBuffer;
 class OutputStack;
 class GCodeBuffer;
 class GCodeQueue;
-class FilamentSensor;
+class FilamentMonitor;
 class RandomProbePointSet;
 class Logger;
 
 #if SUPPORT_IOBITS
 class PortControl;
+#endif
+
+#if SUPPORT_12864_LCD
+class Display;
 #endif
 
 // Define floating point type to use for calculations where we would like high precision in matrix calculations
@@ -106,7 +111,8 @@ extern RepRap reprap;
 
 // Debugging support
 extern "C" void debugPrintf(const char* fmt, ...) __attribute__ ((format (printf, 1, 2)));
-#define DEBUG_HERE do { debugPrintf("At " __FILE__ " line %d\n", __LINE__); delay(50); } while (false)
+#define DEBUG_HERE do { } while (false)
+//#define DEBUG_HERE do { debugPrintf("At " __FILE__ " line %d\n", __LINE__); delay(50); } while (false)
 
 // Functions and globals not part of any class
 bool StringEndsWith(const char* string, const char* ending);
@@ -182,15 +188,15 @@ template<typename BitmapType> inline void ClearBit(BitmapType &b, unsigned int n
 }
 
 // Convert an array of longs to a bit map with overflow checking
-template<typename BitmapType> BitmapType LongArrayToBitMap(const long *arr, size_t numEntries)
+template<typename BitmapType> BitmapType UnsignedArrayToBitMap(const uint32_t *arr, size_t numEntries)
 {
 	BitmapType res = 0;
 	for (size_t i = 0; i < numEntries; ++i)
 	{
-		const long f = arr[i];
-		if (f >= 0 && (unsigned long)f < sizeof(BitmapType) * CHAR_BIT)
+		const uint32_t f = arr[i];
+		if (f < sizeof(BitmapType) * CHAR_BIT)
 		{
-			SetBit(res, (unsigned int)f);
+			SetBit(res, f);
 		}
 	}
 	return res;
@@ -230,7 +236,7 @@ const uint32_t NvicPriorityWatchdog = 0;		// the secondary watchdog has the high
 #endif
 
 const uint32_t NvicPriorityPanelDueUart = 1;	// UART is highest to avoid character loss (it has only a 1-character receive buffer)
-const uint32_t NvicPriorityDriversUsart = 2;	// USART used to control and monitor the TMC2660 drivers
+const uint32_t NvicPriorityDriversSerialTMC = 2;// USART or UART used to control and monitor the smart drivers
 const uint32_t NvicPrioritySystick = 3;			// systick kicks the watchdog and starts the ADC conversions, so must be quite high
 const uint32_t NvicPriorityPins = 4;			// priority for GPIO pin interrupts - filament sensors must be higher than step
 const uint32_t NvicPriorityStep = 5;			// step interrupt is next highest, it can preempt most other interrupts

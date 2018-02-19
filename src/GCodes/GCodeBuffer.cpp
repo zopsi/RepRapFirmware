@@ -95,6 +95,13 @@ bool GCodeBuffer::Put(char c)
 		return LineFinished();
 	}
 
+	if (c == 0x7F && bufferState != GCodeBufferState::discarding)
+	{
+		// The UART receiver stores 0x7F in the buffer if an overrun or framing errors occurs. So discard the command and resync on the next newline.
+		gcodeLineEnd = 0;
+		bufferState = GCodeBufferState::discarding;
+	}
+
 	// Process the incoming character in a state machine
 	bool again;
 	do
@@ -436,7 +443,7 @@ float GCodeBuffer::GetFValue()
 }
 
 // Get a colon-separated list of floats after a key letter
-const void GCodeBuffer::GetFloatArray(float a[], size_t& returnedLength, bool doPad)
+const void GCodeBuffer::GetFloatArray(float arr[], size_t& returnedLength, bool doPad)
 {
 	if (readPointer >= 0)
 	{
@@ -451,7 +458,7 @@ const void GCodeBuffer::GetFloatArray(float a[], size_t& returnedLength, bool do
 				returnedLength = 0;
 				return;
 			}
-			a[length] = (float)strtod(&gcodeBuffer[readPointer + 1], 0);
+			arr[length] = (float)strtod(&gcodeBuffer[readPointer + 1], 0);
 			length++;
 			do
 			{
@@ -463,13 +470,12 @@ const void GCodeBuffer::GetFloatArray(float a[], size_t& returnedLength, bool do
 			}
 		}
 
-		// Special case if there is one entry and returnedLength requests several.
-		// Fill the array with the first entry.
+		// Special case if there is one entry and returnedLength requests several. Fill the array with the first entry.
 		if (doPad && length == 1 && returnedLength > 1)
 		{
 			for(size_t i = 1; i < returnedLength; i++)
 			{
-				a[i] = a[0];
+				arr[i] = arr[0];
 			}
 		}
 		else
@@ -486,8 +492,8 @@ const void GCodeBuffer::GetFloatArray(float a[], size_t& returnedLength, bool do
 	}
 }
 
-// Get a :-separated list of longs after a key letter
-const void GCodeBuffer::GetLongArray(long l[], size_t& returnedLength)
+// Get a :-separated list of ints after a key letter
+const void GCodeBuffer::GetIntArray(int32_t arr[], size_t& returnedLength, bool doPad)
 {
 	if (readPointer >= 0)
 	{
@@ -497,12 +503,12 @@ const void GCodeBuffer::GetLongArray(long l[], size_t& returnedLength)
 		{
 			if (length >= returnedLength) // Array limit has been set in here
 			{
-				reprap.GetPlatform().MessageF(ErrorMessage, "GCodes: Attempt to read a GCode long array that is too long: %s\n", gcodeBuffer);
+				reprap.GetPlatform().MessageF(ErrorMessage, "GCodes: Attempt to read a GCode int array that is too long: %s\n", gcodeBuffer);
 				readPointer = -1;
 				returnedLength = 0;
 				return;
 			}
-			l[length] = strtol(&gcodeBuffer[readPointer + 1], 0, 0);
+			arr[length] = strtol(&gcodeBuffer[readPointer + 1], 0, 0);
 			length++;
 			do
 			{
@@ -513,7 +519,69 @@ const void GCodeBuffer::GetLongArray(long l[], size_t& returnedLength)
 				inList = false;
 			}
 		}
-		returnedLength = length;
+
+		// Special case if there is one entry and returnedLength requests several. Fill the array with the first entry.
+		if (doPad && length == 1 && returnedLength > 1)
+		{
+			for (size_t i = 1; i < returnedLength; i++)
+			{
+				arr[i] = arr[0];
+			}
+		}
+		else
+		{
+			returnedLength = length;
+		}
+		readPointer = -1;
+	}
+	else
+	{
+		INTERNAL_ERROR;
+		returnedLength = 0;
+	}
+}
+
+// Get a :-separated list of unsigned ints after a key letter
+const void GCodeBuffer::GetUnsignedArray(uint32_t arr[], size_t& returnedLength, bool doPad)
+{
+	if (readPointer >= 0)
+	{
+		size_t length = 0;
+		bool inList = true;
+		while(inList)
+		{
+			if (length >= returnedLength) // Array limit has been set in here
+			{
+				reprap.GetPlatform().MessageF(ErrorMessage, "GCodes: Attempt to read a GCode unsigned array that is too long: %s\n", gcodeBuffer);
+				readPointer = -1;
+				returnedLength = 0;
+				return;
+			}
+			arr[length] = strtoul(&gcodeBuffer[readPointer + 1], 0, 0);
+			length++;
+			do
+			{
+				readPointer++;
+			} while(gcodeBuffer[readPointer] != 0 && (gcodeBuffer[readPointer] != ' ') && (gcodeBuffer[readPointer] != LIST_SEPARATOR));
+			if (gcodeBuffer[readPointer] != LIST_SEPARATOR)
+			{
+				inList = false;
+			}
+		}
+
+		// Special case if there is one entry and returnedLength requests several. Fill the array with the first entry.
+		if (doPad && length == 1 && returnedLength > 1)
+		{
+			for (size_t i = 1; i < returnedLength; i++)
+			{
+				arr[i] = arr[0];
+			}
+		}
+		else
+		{
+			returnedLength = length;
+		}
+
 		readPointer = -1;
 	}
 	else
@@ -906,7 +974,17 @@ void GCodeBuffer::MessageAcknowledged(bool cancelled)
 // Return true if we can queue gcodes from this source
 bool GCodeBuffer::CanQueueCodes() const
 {
-	return queueCodes || machineState->doingFileMacro;	// return true if we queue commands form this source or we are executing a macro
+	return queueCodes || machineState->doingFileMacro;		// return true if we queue commands from this source or we are executing a macro
+}
+
+// Write the command to a string
+void GCodeBuffer::PrintCommand(const StringRef& s) const
+{
+	s.printf("%c%d", commandLetter, commandNumber);
+	if (commandFraction >= 0)
+	{
+		s.catf(".%d", commandFraction);
+	}
 }
 
 // End

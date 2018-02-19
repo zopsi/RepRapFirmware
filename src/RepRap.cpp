@@ -19,6 +19,10 @@
 # include "PortControl.h"
 #endif
 
+#if SUPPORT_12864_LCD
+# include "Display/Display.h"
+#endif
+
 #if HAS_HIGH_SPEED_SD
 # include "sam/drivers/hsmci/hsmci.h"
 #endif
@@ -47,8 +51,15 @@ extern "C" void hsmciIdle()
 
 	if (reprap.GetSpinningModule() != moduleFilamentSensors)
 	{
-		FilamentSensor::Spin(false);
+		FilamentMonitor::Spin(false);
 	}
+
+#if SUPPORT_12864_LCD
+	if (reprap.GetSpinningModule() != moduleDisplay)
+	{
+		reprap.GetDisplay().Spin(false);
+	}
+#endif
 }
 
 // RepRap member functions.
@@ -76,11 +87,13 @@ RepRap::RepRap() : toolList(nullptr), currentTool(nullptr), lastWarningMillis(0)
 #if SUPPORT_IOBITS
 	portControl = new PortControl();
 #endif
+#if SUPPORT_12864_LCD
+ 	display = new Display();
+#endif
 
 	printMonitor = new PrintMonitor(*platform, *gCodes);
 
 	SetPassword(DEFAULT_PASSWORD);
-	SetName(DEFAULT_NAME);
 	message[0] = 0;
 }
 
@@ -88,8 +101,9 @@ void RepRap::Init()
 {
 	// All of the following init functions must execute reasonably quickly before the watchdog times us out
 	platform->Init();
-	gCodes->Init();
 	network->Init();
+	SetName(DEFAULT_MACHINE_NAME);		// network must be initialised before calling this because it calls SetHostName
+	gCodes->Init();
 	move->Init();
 	heat->Init();
 #if SUPPORT_ROLAND
@@ -102,7 +116,10 @@ void RepRap::Init()
 	portControl->Init();
 #endif
 	printMonitor->Init();
-	active = true;					// must do this before we start the network, else the watchdog may time out
+#if SUPPORT_12864_LCD
+ 	display->Init();
+#endif
+	active = true;						// must do this before we start the network, else the watchdog may time out
 
 	platform->MessageF(UsbMessage, "%s Version %s dated %s\n", FIRMWARE_NAME, VERSION, DATE);
 
@@ -160,6 +177,9 @@ void RepRap::Exit()
 #endif
 #if SUPPORT_IOBITS
 	portControl->Exit();
+#endif
+#if SUPPORT_12864_LCD
+ 	display->Exit();
 #endif
 	network->Exit();
 	platform->Exit();
@@ -223,7 +243,13 @@ void RepRap::Spin()
 
 	ticksInSpinState = 0;
 	spinningModule = moduleFilamentSensors;
-	FilamentSensor::Spin(true);
+	FilamentMonitor::Spin(true);
+
+#if SUPPORT_12864_LCD
+	ticksInSpinState = 0;
+	spinningModule = moduleDisplay;
+	display->Spin(true);
+#endif
 
 	ticksInSpinState = 0;
 	spinningModule = noModule;
@@ -272,7 +298,10 @@ void RepRap::Diagnostics(MessageType mtype)
 	heat->Diagnostics(mtype);
 	gCodes->Diagnostics(mtype);
 	network->Diagnostics(mtype);
-	FilamentSensor::Diagnostics(mtype);
+	FilamentMonitor::Diagnostics(mtype);
+#ifdef DUET_NG
+	DuetExpansion::Diagnostics(mtype);
+#endif
 }
 
 // Turn off the heaters, disable the motors, and deactivate the Heat and Move classes. Leave everything else working.
@@ -425,7 +454,7 @@ void RepRap::SelectTool(int toolNumber, bool simulating)
 	currentTool = newTool;
 }
 
-void RepRap::PrintTool(int toolNumber, StringRef& reply) const
+void RepRap::PrintTool(int toolNumber, const StringRef& reply) const
 {
 	const Tool* const tool = GetTool(toolNumber);
 	if (tool != nullptr)
@@ -577,7 +606,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 	response->printf("{\"status\":\"%c\",\"coords\":{", ch);
 
 	// Coordinates
-	const size_t numAxes = gCodes->GetVisibleAxes();
+	const size_t numVisibleAxes = gCodes->GetVisibleAxes();
 	{
 		float liveCoordinates[DRIVES];
 #if SUPPORT_ROLAND
@@ -593,7 +622,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 
 		if (currentTool != nullptr)
 		{
-			for (size_t i = 0; i < numAxes; ++i)
+			for (size_t i = 0; i < numVisibleAxes; ++i)
 			{
 				liveCoordinates[i] += currentTool->GetOffset(i);
 			}
@@ -602,7 +631,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		// Homed axes
 		response->cat("\"axesHomed\":");
 		ch = '[';
-		for (size_t axis = 0; axis < numAxes; ++axis)
+		for (size_t axis = 0; axis < numVisibleAxes; ++axis)
 		{
 			response->catf("%c%d", ch, (gCodes->GetAxisIsHomed(axis)) ? 1 : 0);
 			ch = ',';
@@ -613,7 +642,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		ch = '[';
 		for (size_t extruder = 0; extruder < GetExtrudersInUse(); extruder++)
 		{
-			response->catf("%c%.1f", ch, (double)liveCoordinates[numAxes + extruder]);
+			response->catf("%c%.1f", ch, (double)liveCoordinates[gCodes->GetTotalAxes() + extruder]);
 			ch = ',';
 		}
 		if (ch == '[')
@@ -625,7 +654,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		// TODO ideally we would report "unknown" or similar for axis positions that are not known because we haven't homed them, but that requires changes to both DWC and PanelDue.
 		response->cat("],\"xyz\":");
 		ch = '[';
-		for (size_t axis = 0; axis < numAxes; axis++)
+		for (size_t axis = 0; axis < numVisibleAxes; axis++)
 		{
 			// Coordinates may be NaNs, for example when delta or SCARA homing fails. Replace any NaNs or infinities by 9999.9 to prevent JSON parsing errors.
 			const float coord = liveCoordinates[axis];
@@ -639,8 +668,8 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 
 	// Output notifications
 	{
-		bool sendBeep = ((source == ResponseSource::AUX || !platform->HaveAux()) && beepDuration != 0 && beepFrequency != 0);
-		bool sendMessage = (message[0] != 0);
+		const bool sendBeep = ((source == ResponseSource::AUX || !platform->HaveAux()) && beepDuration != 0 && beepFrequency != 0);
+		const bool sendMessage = (message[0] != 0);
 
 		float timeLeft = 0.0;
 		if (displayMessageBox && boxTimer != 0)
@@ -656,7 +685,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 			// Report beep values
 			if (sendBeep)
 			{
-				response->catf("\"beepDuration\":%d,\"beepFrequency\":%d", beepDuration, beepFrequency);
+				response->catf("\"beepDuration\":%u,\"beepFrequency\":%u", beepDuration, beepFrequency);
 				if (sendMessage)
 				{
 					response->cat(",");
@@ -680,9 +709,9 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 			if (displayMessageBox)
 			{
 				response->cat("\"msgBox\":{\"msg\":");
-				response->EncodeString(boxMessage, ARRAY_SIZE(boxMessage), false);
+				response->EncodeString(boxMessage.c_str(), boxMessage.MaxLength(), false);
 				response->cat(",\"title\":");
-				response->EncodeString(boxTitle, ARRAY_SIZE(boxTitle), false);
+				response->EncodeString(boxTitle.c_str(), boxTitle.MaxLength(), false);
 				response->catf(",\"mode\":%d,\"seq\":%" PRIu32 ",\"timeout\":%.1f,\"controls\":%" PRIu32 "}", boxMode, boxSeq, (double)timeLeft, boxControls);
 			}
 			response->cat("}");
@@ -925,8 +954,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		uint32_t endstops = 0;
 		for(size_t drive = 0; drive < DRIVES; drive++)
 		{
-			EndStopHit stopped = platform->Stopped(drive);
-			if (stopped == EndStopHit::highHit || stopped == EndStopHit::lowHit)
+			if (platform->EndStopInputState(drive))
 			{
 				endstops |= (1u << drive);
 			}
@@ -934,7 +962,7 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 		response->catf(",\"endstops\":%" PRIu32, endstops);
 
 		// Firmware name, machine geometry and number of axes
-		response->catf(",\"firmwareName\":\"%s\",\"geometry\":\"%s\",\"axes\":%u,\"axisNames\":\"%s\"", FIRMWARE_NAME, move->GetGeometryString(), numAxes, gCodes->GetAxisLetters());
+		response->catf(",\"firmwareName\":\"%s\",\"geometry\":\"%s\",\"axes\":%u,\"axisNames\":\"%s\"", FIRMWARE_NAME, move->GetGeometryString(), numVisibleAxes, gCodes->GetAxisLetters());
 
 		// Total and mounted volumes
 		size_t mountedCards = 0;
@@ -949,20 +977,20 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 
 		// Machine name
 		response->cat(",\"name\":");
-		response->EncodeString(myName, ARRAY_SIZE(myName), false);
+		response->EncodeString(myName.c_str(), myName.MaxLength(), false);
 
 		/* Probe */
 		{
-			const ZProbeParameters probeParams = platform->GetCurrentZProbeParameters();
+			const ZProbe probeParams = platform->GetCurrentZProbeParameters();
 
 			// Trigger threshold
 			response->catf(",\"probe\":{\"threshold\":%" PRIi32, probeParams.adcValue);
 
 			// Trigger height
-			response->catf(",\"height\":%.2f", (double)probeParams.height);
+			response->catf(",\"height\":%.2f", (double)probeParams.triggerHeight);
 
 			// Type
-			response->catf(",\"type\":%d}", platform->GetZProbeType());
+			response->catf(",\"type\":%u}", (unsigned int)platform->GetZProbeType());
 		}
 
 		/* Tool Mapping */
@@ -1047,12 +1075,12 @@ OutputBuffer *RepRap::GetStatusResponse(uint8_t type, ResponseSource source)
 
 				// Offsets
 				response->cat(",\"offsets\":[");
-				for (size_t i = 0; i < numAxes; i++)
+				for (size_t i = 0; i < numVisibleAxes; i++)
 				{
 					response->catf((i == 0) ? "%.2f" : ",%.2f", (double)tool->GetOffset(i));
 				}
 
-				// Do we have any more tools?
+  				// Do we have any more tools?
 				response->cat((tool->Next() != nullptr) ? "]}," : "]}");
 			}
 			response->cat("]");
@@ -1186,7 +1214,7 @@ OutputBuffer *RepRap::GetConfigResponse()
 	ch = '[';
 	for (size_t drive = 0; drive < DRIVES; drive++)
 	{
-		response->catf("%c%.2f", ch, (double)(platform->GetMotorCurrent(drive, false)));
+		response->catf("%c%.2f", ch, (double)(platform->GetMotorCurrent(drive, 906)));
 		ch = ',';
 	}
 
@@ -1206,9 +1234,19 @@ OutputBuffer *RepRap::GetConfigResponse()
 #endif
 	response->catf("\",\"firmwareName\":\"%s\"", FIRMWARE_NAME);
 	response->catf(",\"firmwareVersion\":\"%s\"", VERSION);
-#if defined(DUET_NG) && defined(DUET_WIFI)
-	response->catf(",\"dwsVersion\":\"%s\"", network->GetWiFiServerVersion());
+
+#if HAS_WIFI_NETWORKING
+	// If we have WiFi networking, send the WiFi module firmware version
+# ifdef DUET_NG
+	if (platform->IsDuetWiFi())
+	{
+# endif
+		response->catf(",\"dwsVersion\":\"%s\"", network->GetWiFiServerVersion());
+# ifdef DUET_NG
+	}
+# endif
 #endif
+
 	response->catf(",\"firmwareDate\":\"%s\"", DATE);
 
 	// Motor idle parameters
@@ -1220,7 +1258,7 @@ OutputBuffer *RepRap::GetConfigResponse()
 	ch = '[';
 	for (size_t drive = 0; drive < DRIVES; drive++)
 	{
-		response->catf("%c%.2f", ch, (double)(platform->ConfiguredInstantDv(drive)));
+		response->catf("%c%.2f", ch, (double)(platform->GetInstantDv(drive)));
 		ch = ',';
 	}
 
@@ -1397,9 +1435,9 @@ OutputBuffer *RepRap::GetLegacyStatusResponse(uint8_t type, int seq)
 		response->catf(",\"msgBox.mode\":%d,\"msgBox.seq\":%" PRIu32 ",\"msgBox.timeout\":%.1f,\"msgBox.controls\":%" PRIu32 "",
 						boxMode, boxSeq, (double)timeLeft, boxControls);
 		response->cat(",\"msgBox.msg\":");
-		response->EncodeString(boxMessage, ARRAY_SIZE(boxMessage), false);
+		response->EncodeString(boxMessage.c_str(), boxMessage.MaxLength(), false);
 		response->cat(",\"msgBox.title\":");
-		response->EncodeString(boxTitle, ARRAY_SIZE(boxTitle), false);
+		response->EncodeString(boxTitle.c_str(), boxTitle.MaxLength(), false);
 	}
 	else
 	{
@@ -1422,7 +1460,7 @@ OutputBuffer *RepRap::GetLegacyStatusResponse(uint8_t type, int seq)
 		// Add the static fields
 		response->catf(",\"geometry\":\"%s\",\"axes\":%u,\"axisNames\":\"%s\",\"volumes\":%u,\"numTools\":%u,\"myName\":",
 						move->GetGeometryString(), numAxes, gCodes->GetAxisLetters(), NumSdCards, GetNumberOfContiguousTools());
-		response->EncodeString(myName, ARRAY_SIZE(myName), false);
+		response->EncodeString(myName.c_str(), myName.MaxLength(), false);
 		response->cat(",\"firmwareName\":");
 		response->EncodeString(FIRMWARE_NAME, strlen(FIRMWARE_NAME), false);
 	}
@@ -1470,7 +1508,7 @@ OutputBuffer *RepRap::GetFilesResponse(const char *dir, bool flagsDirs)
 		bool gotFile = platform->GetMassStorage()->FindFirst(dir, fileInfo);	// TODO error handling here
 
 		size_t bytesLeft = OutputBuffer::GetBytesLeft(response);	// don't write more bytes than we can
-		char filename[FILENAME_LENGTH];
+		char filename[MaxFilenameLength];
 		filename[0] = '*';
 		const char *fname;
 
@@ -1501,7 +1539,7 @@ OutputBuffer *RepRap::GetFilesResponse(const char *dir, bool flagsDirs)
 				{
 					bytesLeft -= response->cat(',');
 				}
-				bytesLeft -= response->EncodeString(fname, FILENAME_LENGTH, false);
+				bytesLeft -= response->EncodeString(fname, MaxFilenameLength, false);
 
 				firstFile = false;
 			}
@@ -1565,7 +1603,7 @@ OutputBuffer *RepRap::GetFilelistResponse(const char *dir)
 
 			// Write another file entry
 			bytesLeft -= response->catf("{\"type\":\"%c\",\"name\":", fileInfo.isDirectory ? 'd' : 'f');
-			bytesLeft -= response->EncodeString(fileInfo.fileName, FILENAME_LENGTH, false);
+			bytesLeft -= response->EncodeString(fileInfo.fileName, MaxFilenameLength, false);
 			bytesLeft -= response->catf(",\"size\":%" PRIu32, fileInfo.size);
 
 			const struct tm * const timeInfo = gmtime(&fileInfo.lastModified);
@@ -1589,15 +1627,28 @@ OutputBuffer *RepRap::GetFilelistResponse(const char *dir)
 }
 
 // Send a beep. We send it to both PanelDue and the web interface.
-void RepRap::Beep(int freq, int ms)
+void RepRap::Beep(unsigned int freq, unsigned int ms)
 {
-	beepFrequency = freq;
-	beepDuration = ms;
+	// Limit the frequency and duration to sensible values
+	freq = constrain<unsigned int>(freq, 50, 10000);
+	ms = constrain<unsigned int>(ms, 10, 60000);
 
+	// If there is an LCD device present, make it beep
+#if SUPPORT_12864_LCD
+	if (display->IsPresent())
+	{
+		display->Beep(freq, ms);
+	}
+	else
+#endif
 	if (platform->HaveAux())
 	{
-		// If there is an LCD device present, make it beep
 		platform->Beep(freq, ms);
+	}
+	else
+	{
+		beepFrequency = freq;
+		beepDuration = ms;
 	}
 }
 
@@ -1615,8 +1666,8 @@ void RepRap::SetMessage(const char *msg)
 // Display a message box on the web interface
 void RepRap::SetAlert(const char *msg, const char *title, int mode, float timeout, AxesBitmap controls)
 {
-	SafeStrncpy(boxMessage, msg, ARRAY_SIZE(boxMessage));
-	SafeStrncpy(boxTitle, title, ARRAY_SIZE(boxTitle));
+	boxMessage.copy(msg);
+	boxTitle.copy(title);
 	boxMode = mode;
 	boxTimer = (timeout <= 0.0) ? 0 : millis();
 	boxTimeout = round(max<float>(timeout, 0.0) * 1000.0);
@@ -1648,32 +1699,33 @@ char RepRap::GetStatusCharacter() const
 
 bool RepRap::NoPasswordSet() const
 {
-	return (!password[0] || StringEquals(password, DEFAULT_PASSWORD));
+	return (password[0] == 0 || CheckPassword(DEFAULT_PASSWORD));
 }
 
 bool RepRap::CheckPassword(const char *pw) const
 {
-	return StringEquals(pw, password);
+	String<PASSWORD_LENGTH> copiedPassword;
+	copiedPassword.CopyAndPad(pw);
+	return password.ConstantTimeEquals(copiedPassword);
 }
 
 void RepRap::SetPassword(const char* pw)
 {
-	// Users sometimes put a tab character between the password and the comment, so allow for this
-	SafeStrncpy(password, pw, ARRAY_SIZE(password));
+	password.CopyAndPad(pw);
 }
 
 const char *RepRap::GetName() const
 {
-	return myName;
+	return myName.c_str();
 }
 
 void RepRap::SetName(const char* nm)
 {
 	// Users sometimes put a tab character between the machine name and the comment, so allow for this
-	SafeStrncpy(myName, nm, ARRAY_SIZE(myName));
+	myName.copy(nm);
 
 	// Set new DHCP hostname
-	network->SetHostname(myName);
+	network->SetHostname(myName.c_str());
 }
 
 // Given that we want to extrude/retract the specified extruder drives, check if they are allowed.

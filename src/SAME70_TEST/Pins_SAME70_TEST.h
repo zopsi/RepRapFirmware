@@ -1,9 +1,9 @@
 #ifndef PINS_SAME70_H__
 #define PINS_SAME70_H__
 
-# define FIRMWARE_NAME "RepRapFirmware for SAME70"
-# define DEFAULT_BOARD_TYPE BoardType::SAME70_TEST
-const size_t NumFirmwareUpdateModules = 4;		// 3 modules, plus one for manual upload to WiFi module
+# define FIRMWARE_NAME		"RepRapFirmware for SAME70"
+# define DEFAULT_BOARD_TYPE BoardType::SamE70TestBoard
+const size_t NumFirmwareUpdateModules = 4;		// 3 modules, plus one for manual upload to WiFi module (module 2 not used)
 # define IAP_FIRMWARE_FILE	"SAME70Firmware.bin"
 # define WIFI_FIRMWARE_FILE	"DuetWiFiServer.bin"
 # define WIFI_WEB_FILE		"DuetWebControl.bin"
@@ -13,8 +13,10 @@ const size_t NumFirmwareUpdateModules = 4;		// 3 modules, plus one for manual up
 #define HAS_WIFI_NETWORKING		1
 #define HAS_CPU_TEMP_SENSOR		0
 #define HAS_HIGH_SPEED_SD		1
-#define HAS_SMART_DRIVERS		0
+#define HAS_SMART_DRIVERS		0		// TBD
+#define HAS_STALL_DETECT		0		// TBD
 #define HAS_VOLTAGE_MONITOR		0		// TBD
+#define HAS_VREF_MONITOR		0		// TBD
 #define ACTIVE_LOW_HEAT_ON		1
 
 #define IAP_UPDATE_FILE		"iape70.bin"		// need special build for SAME70
@@ -24,8 +26,9 @@ const size_t NumFirmwareUpdateModules = 4;		// 3 modules, plus one for manual up
 #define SUPPORT_SCANNER		0					// set zero to disable support for FreeLSS scanners
 #define SUPPORT_IOBITS		1					// set to support P parameter in G0/G1 commands
 #define SUPPORT_DHT_SENSOR	0					// set nonzero to support DHT temperature/humidity sensors
+#define SUPPORT_WORKPLACE_COORDINATES	1		// set nonzero to support G10 L2 and G53..59
 
-#define USE_CACHE			0					// Cache controller not available on the SAME70
+#define USE_CACHE			0					// Cache controller has some problems on the SAME70
 
 // The physical capabilities of the machine
 
@@ -49,6 +52,9 @@ constexpr size_t MaxDriversPerAxis = 4;				// The maximum number of stepper driv
 constexpr size_t NUM_SERIAL_CHANNELS = 2;			// The number of serial IO channels (USB and one auxiliary UART)
 #define SERIAL_MAIN_DEVICE SerialUSB
 #define SERIAL_AUX_DEVICE Serial
+
+//TWI is disabled for now on the SAM7E until we rewrite the driver
+//#define I2C_IFACE	Wire							// Which TWI interface we use
 
 constexpr Pin DueXnExpansionStart = 200;			// Pin numbers 200-215 are on the I/O expander
 constexpr Pin AdditionalIoExpansionStart = 220;		// Pin numbers 220-235 are on the additional I/O expander
@@ -154,7 +160,7 @@ constexpr uint32_t IAP_FLASH_END = 0x0047FFFF;		// we allow a full 64K on the SA
 // Duet pin numbers to control the WiFi interface
 constexpr Pin EspResetPin = 19;					// Low on this in holds the WiFi module in reset (ESP_RESET)
 constexpr Pin EspEnablePin = 48;				// High to enable the WiFi module, low to power it down (ESP_CH_PD)
-constexpr Pin EspTransferRequestPin = 12;		// Input from the WiFi module indicating that it wants to transfer data (ESP GPIO0)
+constexpr Pin EspDataReadyPin = 12;				// Input from the WiFi module indicating that it wants to transfer data (ESP GPIO0)
 constexpr Pin SamTfrReadyPin = 36;				// Output from the SAM to the WiFi module indicating we can accept a data transfer (ESP GPIO4 via 7474)
 constexpr Pin SamCsPin = 20;					// SPI NPCS pin, input from WiFi module
 
@@ -163,10 +169,12 @@ constexpr Pin SamCsPin = 20;					// SPI NPCS pin, input from WiFi module
 #define NETWORK_TC_CHAN		(0)
 #define NETWORK_TC_IRQN		TC0_IRQn
 #define NETWORK_TC_HANDLER	TC0_Handler
+#define NETWORK_TC_ID		ID_TC0
 
 #define STEP_TC				(TC0)
 #define STEP_TC_CHAN		(1)
 #define STEP_TC_IRQN		TC1_IRQn
 #define STEP_TC_HANDLER		TC1_Handler
+#define STEP_TC_ID			ID_TC1
 
 #endif

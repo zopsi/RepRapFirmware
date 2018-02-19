@@ -13,12 +13,12 @@
 #include "Platform.h"
 
 
-const char* ALIGN_ON_G = "align_on.g";
-const char* ALIGN_OFF_G = "align_off.g";
-const char* SCAN_PRE_G = "scan_pre.g";
-const char* SCAN_POST_G = "scan_post.g";
-const char* CALIBRATE_PRE_G = "calibrate_pre.g";
-const char* CALIBRATE_POST_G = "calibrate_post.g";
+const char* const ALIGN_ON_G = "align_on.g";
+const char* const ALIGN_OFF_G = "align_off.g";
+const char* const SCAN_PRE_G = "scan_pre.g";
+const char* const SCAN_POST_G = "scan_post.g";
+const char* const CALIBRATE_PRE_G = "calibrate_pre.g";
+const char* const CALIBRATE_POST_G = "calibrate_post.g";
 
 
 void Scanner::Init()
@@ -124,10 +124,10 @@ void Scanner::Spin()
 			if (!IsDoingFileMacro())
 			{
 				// Pre macro complete, build and send SCAN command
-				char scanCommand[FILENAME_LENGTH + 16];
-				snprintf(scanCommand, FILENAME_LENGTH + 16, "SCAN %d %s\n", scanParam, scanFilename);
+				String<MaxFilenameLength + 16> scanCommand;
+				scanCommand.GetRef().printf("SCAN %d %s\n", scanParam, scanFilename.c_str());
 
-				SERIAL_MAIN_DEVICE.write(scanCommand);
+				SERIAL_MAIN_DEVICE.write(scanCommand.c_str());
 				SERIAL_MAIN_DEVICE.flush();
 
 				// Advance to the next state
@@ -376,7 +376,7 @@ bool Scanner::StartScan(const char *filename, int param)
 
 	// Copy the scan length/degree and the filename
 	scanParam = param;
-	SafeStrncpy(scanFilename, filename, ARRAY_SIZE(scanFilename));
+	scanFilename.copy(filename);
 
 	// Run the scan_pre macro and wait for it to finish
 	DoFileMacro(SCAN_PRE_G);
@@ -409,7 +409,7 @@ bool Scanner::Cancel()
 	return true;
 }
 
-// Send ALIGN ON/OFF to the 3D sanner
+// Send ALIGN ON/OFF to the 3D scanner
 bool Scanner::SetAlignment(bool on)
 {
 	if (state != ScannerState::Idle)
@@ -522,11 +522,9 @@ void Scanner::DoFileMacro(const char *filename)
 {
 	if (platform.GetMassStorage()->FileExists(SYS_DIR, filename))
 	{
-		char gcode[FILENAME_LENGTH + 7];
-		snprintf(gcode, ARRAY_SIZE(gcode), "M98 P%s\n", filename);
-		gcode[ARRAY_UPB(gcode)] = 0;
-
-		serialGCode->Put(gcode);
+		String<MaxFilenameLength + 7> gcode;
+		gcode.GetRef().printf("M98 P%s\n", filename);
+		serialGCode->Put(gcode.c_str());
 	}
 }
 
