@@ -38,7 +38,7 @@ Licence: GPL
 #include "Storage/FileData.h"
 #include "Storage/MassStorage.h"	// must be after Pins.h because it needs NumSdCards defined
 #include "MessageType.h"
-#include "Zprobe.h"
+#include "ZProbe.h"
 #include "ZProbeProgrammer.h"
 
 #if defined(DUET_NG)
@@ -329,8 +329,8 @@ public:
 
   	// Communications and data storage
 	OutputBuffer *GetAuxGCodeReply();				// Returns cached G-Code reply for AUX devices and clears its reference
-	void AppendAuxReply(OutputBuffer *buf);
-	void AppendAuxReply(const char *msg);
+	void AppendAuxReply(OutputBuffer *buf, bool rawMessage);
+	void AppendAuxReply(const char *msg, bool rawMessage);
     uint32_t GetAuxSeq() { return auxSeq; }
     bool HaveAux() const { return auxDetected; }	// Any device on the AUX line?
     void SetAuxDetected() { auxDetected = true; }

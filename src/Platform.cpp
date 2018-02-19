@@ -1297,7 +1297,7 @@ void Platform::SetNetMask(byte nm[])
 	UpdateNetworkAddress(netMask, nm);
 }
 
-// Flush messages to USB and aux, returning true if there is more to send
+// Flush messages to aux, returning true if there is more to send
 bool Platform::FlushAuxMessages()
 {
 	// Write non-blocking data to the AUX line
@@ -3410,14 +3410,14 @@ void Platform::GetEndStopConfiguration(size_t axis, EndStopPosition& esType, End
 
 //-----------------------------------------------------------------------------------------------------
 
-void Platform::AppendAuxReply(const char *msg)
+void Platform::AppendAuxReply(const char *msg, bool rawMessage)
 {
 	// Discard this response if either no aux device is attached or if the response is empty
 	if (msg[0] != 0 && HaveAux())
 	{
-		if (msg[0] == '{')
+		if (rawMessage)
 		{
-			// JSON responses are always sent directly to the AUX device
+			// Raw responses are sent directly to the AUX device
 			OutputBuffer *buf;
 			if (OutputBuffer::Allocate(buf))
 			{
@@ -3437,14 +3437,14 @@ void Platform::AppendAuxReply(const char *msg)
 	}
 }
 
-void Platform::AppendAuxReply(OutputBuffer *reply)
+void Platform::AppendAuxReply(OutputBuffer *reply, bool rawMessage)
 {
 	// Discard this response if either no aux device is attached or if the response is empty
 	if (reply == nullptr || reply->Length() == 0 || !HaveAux())
 	{
 		OutputBuffer::ReleaseAll(reply);
 	}
-	else if ((*reply)[0] == '{')
+	else if (rawMessage)
 	{
 		// JSON responses are always sent directly to the AUX device
 		// For big responses it makes sense to write big chunks of data in portions. Store this data here
@@ -3481,7 +3481,7 @@ void Platform::RawMessage(MessageType type, const char *message)
 	}
 	else if ((type & LcdMessage) != 0)
 	{
-		AppendAuxReply(message);
+		AppendAuxReply(message, (message[0] == '{')  || (type & RawMessageFlag) != 0);
 	}
 
 	if ((type & HttpMessage) != 0)
@@ -3597,7 +3597,7 @@ void Platform::Message(const MessageType type, OutputBuffer *buffer)
 
 		if ((type & (LcdMessage | ImmediateLcdMessage)) != 0)
 		{
-			AppendAuxReply(buffer);
+			AppendAuxReply(buffer, ((*buffer)[0] == '{') || (type & RawMessageFlag) != 0);
 		}
 
 		if ((type & HttpMessage) != 0)

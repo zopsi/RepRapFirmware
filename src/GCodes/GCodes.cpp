@@ -3454,7 +3454,7 @@ void GCodes::HandleReply(GCodeBuffer& gb, bool error, const char* reply)
 	// Second UART device, e.g. PanelDue. Do NOT use emulation for this one!
 	if (&gb == auxGCode)
 	{
-		platform.AppendAuxReply(reply);
+		platform.AppendAuxReply(reply, reply[0] == '{');
 		return;
 	}
 
@@ -3524,7 +3524,7 @@ void GCodes::HandleReply(GCodeBuffer& gb, bool error, OutputBuffer *reply)
 	// Second UART device, e.g. dc42's PanelDue. Do NOT use emulation for this one!
 	if (&gb == auxGCode)
 	{
-		platform.AppendAuxReply(reply);
+		platform.AppendAuxReply(reply, (*reply)[0] == '{');
 		return;
 	}
 
@@ -4474,7 +4474,7 @@ void GCodes::CheckReportDue(GCodeBuffer& gb, const StringRef& reply) const
 				OutputBuffer * const statusBuf = GenerateJsonStatusResponse(0, -1, ResponseSource::AUX);
 				if (statusBuf != nullptr)
 				{
-					platform.AppendAuxReply(statusBuf);
+					platform.AppendAuxReply(statusBuf, true);
 				}
 			}
 			gb.whenTimerStarted = now;

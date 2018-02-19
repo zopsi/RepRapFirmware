@@ -1454,6 +1454,47 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 		}
 		break;
 
+	case 118:	// Echo message on host
+	{
+		MessageType type = GenericMessage;
+		if (gb.Seen('P'))
+		{
+			switch (gb.GetIValue())
+			{
+			case 0:		// Generic (default)
+				// no need to set it twice
+				break;
+			case 1:		// USB
+				type = UsbMessage;
+				break;
+			case 2:		// UART port
+				type = DirectLcdMessage;
+				break;
+			case 3:		// HTTP
+				type = HttpMessage;
+				break;
+			case 4:		// Telnet
+				type = TelnetMessage;
+				break;
+			default:
+				reply.printf("Invalid message type: %d", type);
+				result = GCodeResult::error;
+				break;
+			}
+		}
+
+		if (result != GCodeResult::error)
+		{
+			String<GCODE_LENGTH> message;
+			if (gb.Seen(('S')))
+			{
+				gb.GetQuotedString(message.GetRef());
+				platform.Message(type, message.c_str());
+			}
+		}
+		break;
+	}
+
 	case 119:
 		reply.copy("Endstops - ");
 		for (size_t axis = 0; axis < numTotalAxes; axis++)
@@ -1583,7 +1624,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 			{
 				if (currentHeater < 0)
 				{
-					reply.printf("No %s heater has been configuredt for slot %d", heaterName, index);
+					reply.printf("No %s heater has been configured for slot %d", heaterName, index);
 				}
 				else
 				{
@@ -3168,6 +3209,7 @@ bool GCodes::HandleMcode(GCodeBuffer& gb, const StringRef& reply)
 						break;
 					case 1:
 						auxGCode->SetCommsProperties(val);
+						platform.SetAuxDetected();
 						break;
 					default:
 						break;
