@@ -9,7 +9,7 @@
 #define SRC_VERSION_H_
 
 #ifndef VERSION
-# define VERSION "1.21"
+# define VERSION "1.21+1"
 #endif
 
 #ifndef DATE
