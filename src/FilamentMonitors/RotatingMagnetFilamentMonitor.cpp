@@ -34,12 +34,14 @@ void RotatingMagnetFilamentMonitor::Reset()
 {
 	extrusionCommandedThisSegment = extrusionCommandedSinceLastSync = movementMeasuredThisSegment = movementMeasuredSinceLastSync = 0.0;
 	comparisonStarted = false;
+	haveStartBitData = false;
+	hadNonPrintingMoveSinceLastSync = true;			// force a resync
 }
 
 // Configure this sensor, returning true if error and setting 'seen' if we processed any configuration parameters
 bool RotatingMagnetFilamentMonitor::Configure(GCodeBuffer& gb, const StringRef& reply, bool& seen)
 {
-	if (ConfigurePin(gb, reply, CHANGE, seen))
+	if (ConfigurePin(gb, reply, INTERRUPT_MODE_CHANGE, seen))
 	{
 		return true;
 	}
@@ -131,7 +133,7 @@ void RotatingMagnetFilamentMonitor::HandleIncomingData()
 			movementMeasuredSinceLastSync += (float)movement/1024;
 			sensorValue = val;
 
-			if (haveStartBitData)					// if we have a synchronised  value for the amount of extrusion commanded
+			if (haveStartBitData)					// if we have a synchronised value for the amount of extrusion commanded
 			{
 				if (!hadNonPrintingMoveAtStartBit)
 				{
@@ -165,8 +167,9 @@ float RotatingMagnetFilamentMonitor::GetCurrentPosition() const
 }
 
 // Call the following at intervals to check the status. This is only called when extrusion is in progress or imminent.
-// 'filamentConsumed' is the net amount of extrusion since the last call to this function.
-// 'hadNonPrintingMove' is called if filamentConsumed includes extruder movement form non-printing moves.
+// 'filamentConsumed' is the net amount of extrusion commanded since the last call to this function.
+// 'hadNonPrintingMove' is true if filamentConsumed includes extruder movement from non-printing moves.
+// 'fromIsr' is true if this measurement was taken dat the end of the ISR because a potential start bit was seen
 FilamentSensorStatus RotatingMagnetFilamentMonitor::Check(bool full, bool hadNonPrintingMove, bool fromIsr, float filamentConsumed)
 {
 	// 1. Update the extrusion commanded and whether we have had an extruding but non-printing move
@@ -230,6 +233,8 @@ FilamentSensorStatus RotatingMagnetFilamentMonitor::CheckFilament(float amountCo
 	}
 
 	FilamentSensorStatus ret = FilamentSensorStatus::ok;
+	const float extrusionMeasured = amountMeasured * mmPerRev;
+
 	if (!comparisonStarted)
 	{
 		// The first measurement after we start extruding is often a long way out, so discard it
@@ -241,7 +246,6 @@ FilamentSensorStatus RotatingMagnetFilamentMonitor::CheckFilament(float amountCo
 		const float minExtrusionExpected = (amountCommanded >= 0.0)
 											 ? amountCommanded * minMovementAllowed
 												: amountCommanded * maxMovementAllowed;
-		const float extrusionMeasured = amountMeasured * mmPerRev;
 		if (extrusionMeasured < minExtrusionExpected)
 		{
 			ret = FilamentSensorStatus::tooLittleMovement;
@@ -259,7 +263,7 @@ FilamentSensorStatus RotatingMagnetFilamentMonitor::CheckFilament(float amountCo
 	}
 
 	// Update the calibration accumulators, even if the user hasn't asked to do calibration
-	const float ratio = amountMeasured/amountCommanded;
+	const float ratio = extrusionMeasured/amountCommanded;
 	if (calibrationStarted)
 	{
 		if (ratio < minMovementRatio)

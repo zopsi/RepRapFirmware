@@ -23,7 +23,7 @@ enum MessageType : uint16_t
 	AuxMessage = 0x40,					// A message that is to be sent to the second auxiliary device
 	LogMessage = 0x80,					// A message to be written to the log file
 
-	// Special indicators. The next two are not processed when calling the version of Platform::Message that takes an OutputBuffer.
+	// Special indicators. The first two are not processed when calling the version of Platform::Message that takes an OutputBuffer.
 	ErrorMessageFlag = 0x100,			// This is an error message
 	WarningMessageFlag = 0x200,			// This is a warning message
 	RawMessageFlag = 0x400,				// Do not encapsulate this message
@@ -33,7 +33,7 @@ enum MessageType : uint16_t
 	GenericMessage = UsbMessage | LcdMessage | HttpMessage | TelnetMessage,	// A message that is to be sent to the web, Telnet, USB and panel
 	LoggedGenericMessage = GenericMessage | LogMessage,						// A GenericMessage that is also logged
 	DirectLcdMessage = LcdMessage | RawMessageFlag,							// Direct message to LCD
-	ErrorMessage = GenericMessage | LogMessage | ErrorMessageFlag,			// An error message
+ 	ErrorMessage = GenericMessage | LogMessage | ErrorMessageFlag,			// An error message
 	WarningMessage = GenericMessage | LogMessage | WarningMessageFlag,		// A warning message
 	FirmwareUpdateMessage = UsbMessage | ImmediateLcdMessage,				// A message that conveys progress of a firmware update
 	FirmwareUpdateErrorMessage = FirmwareUpdateMessage | ErrorMessageFlag,	// A message that reports an error during a firmware update

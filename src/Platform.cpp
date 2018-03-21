@@ -66,7 +66,7 @@ extern "C" char *sbrk(int i);
 # error Missing feature definition
 #endif
 
-#if SAM4E && USE_CACHE
+#if USE_CACHE
 
 #include "sam/drivers/cmcc/cmcc.h"
 
@@ -114,7 +114,7 @@ const uint32_t fanMaxInterruptCount = 32;			// number of fan interrupts that we 
 static volatile uint32_t fanLastResetTime = 0;		// time (microseconds) at which we last reset the interrupt count, accessed inside and outside ISR
 static volatile uint32_t fanInterval = 0;			// written by ISR, read outside the ISR
 
-const float minStepPulseTiming = 0.2;				// we assume that we always generate step high and low times at least this wide without special action
+const float MinStepPulseTiming = 0.2;				// we assume that we always generate step high and low times at least this wide without special action
 
 const LogicalPin Heater0LogicalPin = 0;
 const LogicalPin Fan0LogicalPin = 20;
@@ -197,7 +197,7 @@ void setup()
 #endif
 	RSTC->RSTC_MR = RSTC_MR_KEY_PASSWD | RSTC_MR_URSTEN;	// ignore any signal on the NRST pin for now so that the reset reason will show as Software
 
-#if SAM4E && USE_CACHE
+#if USE_CACHE
 	// Enable the cache
 	struct cmcc_config g_cmcc_cfg;
 	cmcc_get_config_defaults(&g_cmcc_cfg);
@@ -357,7 +357,7 @@ void Platform::Init()
 	SERIAL_AUX2_DEVICE.begin(baudRates[2]);
 #endif
 
-	compatibility = marlin;						// default to Marlin because the common host programs expect the "OK" response to commands
+	compatibility = Compatibility::marlin;		// default to Marlin because the common host programs expect the "OK" response to commands
 
 	// File management
 	massStorage->Init();
@@ -366,32 +366,36 @@ void Platform::Init()
 	ARRAY_INIT(netMask, DefaultNetMask);
 	ARRAY_INIT(gateWay, DefaultGateway);
 
-#if defined(DUET_NG)  || defined(SAME70_TEST_BOARD)
-	// On the Duet Ethernet and SAM E70, use the unique chip ID as most of the MAC address.
-	// The unique ID is 128 bits long whereas the whole MAC address is only 48 bits,
-	// so we can't guarantee that each Duet will get a unique MAC address this way.
+#if SAM4E || SAM4S || SAME70
+	// Read the unique ID of the MCU
+	memset(uniqueId, 0, sizeof(uniqueId));
+	DisableCache();
+	cpu_irq_disable();
+	const uint32_t rc = flash_read_unique_id(uniqueId, 4);
+	cpu_irq_enable();
+	EnableCache();
+
+	if (rc == 0)
 	{
-		uint32_t idBuf[4];
-		memset(idBuf, 0, sizeof(idBuf));
-		DisableCache();
-		cpu_irq_disable();
-		const uint32_t rc = flash_read_unique_id(idBuf, 4);
-		cpu_irq_enable();
-		EnableCache();
-		if (rc == 0)
+		// Put the checksum at the end
+		// We only print 30 5-bit characters = 128 data bits + 22 checksum bits. So compress the 32 checksum bits into 22.
+		uniqueId[4] = uniqueId[0] ^ uniqueId[1] ^ uniqueId[2] ^ uniqueId[3];
+		uniqueId[4] ^= (uniqueId[4] >> 10);
+
+		// On the Duet Ethernet and SAM E70, use the unique chip ID as most of the MAC address.
+		// The unique ID is 128 bits long whereas the whole MAC address is only 48 bits,
+		// so we can't guarantee that each Duet will get a unique MAC address this way.
+		memset(defaultMacAddress, 0, sizeof(defaultMacAddress));
+		defaultMacAddress[0] = 0xBE;					// use a fixed first byte with the locally-administered bit set
+		const uint8_t * const idBytes = reinterpret_cast<const uint8_t *>(uniqueId);
+		for (size_t i = 0; i < 15; ++i)
 		{
-			memset(defaultMacAddress, 0, sizeof(defaultMacAddress));
-			defaultMacAddress[0] = 0xBE;					// use a fixed first byte with the locally-administered bit set
-			const uint8_t * const idBytes = reinterpret_cast<const uint8_t *>(idBuf);
-			for (size_t i = 0; i < 15; ++i)
-			{
-				defaultMacAddress[(i % 5) + 1] ^= idBytes[i];
-			}
+			defaultMacAddress[(i % 5) + 1] ^= idBytes[i];
 		}
-		else
-		{
-			ARRAY_INIT(defaultMacAddress, DefaultMacAddress);
-		}
+	}
+	else
+	{
+		ARRAY_INIT(defaultMacAddress, DefaultMacAddress);
 	}
 #elif defined(DUET_06_085)
 	ARRAY_INIT(defaultMacAddress, DefaultMacAddress);
@@ -497,9 +501,6 @@ void Platform::Init()
 
 		motorCurrents[drive] = 0.0;
 		motorCurrentFraction[drive] = 1.0;
-#if HAS_SMART_DRIVERS
-		motorStandstillCurrentFraction[drive] = 1.0;
-#endif
 		driverState[drive] = DriverStatus::disabled;
 
 		// Enable pullup resistors on endstop inputs here if necessary.
@@ -517,8 +518,11 @@ void Platform::Init()
 #endif
 	}
 
-	slowDriverStepPulseClocks = 0;								// no extended driver timing configured yet
-	slowDrivers = 0;											// assume no drivers need extended step pulse timing
+	for (uint32_t& entry : slowDriverStepTimingClocks)
+	{
+		entry = 0;												// reset all to zero as we have no known slow drivers yet
+	}
+	slowDriversBitmap = 0;										// assume no drivers need extended step pulse timing
 
 	for (size_t extr = 0; extr < MaxExtruders; ++extr)
 	{
@@ -1254,26 +1258,26 @@ void Platform::Exit()
 
 Compatibility Platform::Emulating() const
 {
-	return (compatibility == reprapFirmware) ? me : compatibility;
+	return (compatibility == Compatibility::reprapFirmware) ? Compatibility::me : compatibility;
 }
 
 void Platform::SetEmulating(Compatibility c)
 {
-	if (c != me && c != reprapFirmware && c != marlin)
+	if (c != Compatibility::me && c != Compatibility::reprapFirmware && c != Compatibility::marlin)
 	{
 		Message(ErrorMessage, "Attempt to emulate unsupported firmware.\n");
 	}
 	else
 	{
-		if (c == reprapFirmware)
+		if (c == Compatibility::reprapFirmware)
 		{
-			c = me;
+			c = Compatibility::me;
 		}
 		compatibility = c;
 	}
 }
 
-void Platform::UpdateNetworkAddress(byte dst[4], const byte src[4])
+void Platform::UpdateNetworkAddress(uint8_t dst[4], const uint8_t src[4])
 {
 	for (uint8_t i = 0; i < 4; i++)
 	{
@@ -1282,17 +1286,17 @@ void Platform::UpdateNetworkAddress(byte dst[4], const byte src[4])
 	reprap.GetNetwork().SetEthernetIPAddress(ipAddress, gateWay, netMask);
 }
 
-void Platform::SetIPAddress(byte ip[])
+void Platform::SetIPAddress(uint8_t ip[])
 {
 	UpdateNetworkAddress(ipAddress, ip);
 }
 
-void Platform::SetGateWay(byte gw[])
+void Platform::SetGateWay(uint8_t gw[])
 {
 	UpdateNetworkAddress(gateWay, gw);
 }
 
-void Platform::SetNetMask(byte nm[])
+void Platform::SetNetMask(uint8_t nm[])
 {
 	UpdateNetworkAddress(netMask, nm);
 }
@@ -1873,7 +1877,7 @@ void Platform::SoftwareReset(uint16_t reason, const uint32_t *stk)
 		}
 		srdBuf[slot].magic = SoftwareResetData::magicValue;
 		srdBuf[slot].resetReason = reason;
-		srdBuf[slot].when = realTime;
+		srdBuf[slot].when = (uint32_t)realTime;			// some compilers/libraries use 64-bit time_t
 		GetStackUsage(nullptr, nullptr, &srdBuf[slot].neverUsedRam);
 		srdBuf[slot].hfsr = SCB->HFSR;
 		srdBuf[slot].cfsr = SCB->CFSR;
@@ -2020,7 +2024,7 @@ void Platform::InitialiseInterrupts()
 	// Interrupt for 4-pin PWM fan sense line
 	if (coolingFanRpmPin != NoPin)
 	{
-		attachInterrupt(coolingFanRpmPin, FanInterrupt, FALLING, nullptr);
+		attachInterrupt(coolingFanRpmPin, FanInterrupt, INTERRUPT_MODE_FALLING, nullptr);
 	}
 
 	// Tick interrupt for ADC conversions
@@ -2053,70 +2057,55 @@ void Platform::InitialiseInterrupts()
 // Print the unique processor ID
 void Platform::PrintUniqueId(MessageType mtype)
 {
-	uint32_t idBuf[5];
-	const irqflags_t flags = cpu_irq_save();
-	DisableCache();
-	const uint32_t rc = flash_read_unique_id(idBuf, 4);
-	EnableCache();
-	cpu_irq_restore(flags);
-	if (rc == 0)
+	// Print the unique ID and checksum as 30 base5 alphanumeric digits
+	char digits[30 + 5 + 1];			// 30 characters, 5 separators, 1 null terminator
+	char *digitPtr = digits;
+	for (size_t i = 0; i < 30; ++i)
 	{
-		// Put the checksum at the end
-		idBuf[4] = idBuf[0] ^ idBuf[1] ^ idBuf[2] ^ idBuf[3];
-
-		// We are only going to print 30 5-bit characters = 128 data bits + 22 checksum bits. So compress the 32 checksum bits into 22.
-		idBuf[4] ^= (idBuf[4] >> 10);
-
-		// Print the unique ID and checksum as 30 base5 alphanumeric digits
-		char digits[30 + 5 + 1];			// 30 characters, 5 separators, 1 null terminator
-		char *digitPtr = digits;
-		for (size_t i = 0; i < 30; ++i)
+		if ((i % 5) == 0 && i != 0)
 		{
-			if ((i % 5) == 0 && i != 0)
-			{
-				*digitPtr++ = '-';
-			}
-			const size_t index = (i * 5) / 32;
-			const size_t shift = (i * 5) % 32;
-			uint32_t val = idBuf[index] >> shift;
-			if (shift > 32 - 5)
-			{
-				// We need some bits from the next dword too
-				val |= idBuf[index + 1] << (32 - shift);
-			}
-			val &= 31;
-			char c;
-			if (val < 10)
-			{
-				c = val + '0';
-			}
-			else
-			{
-				c = val + ('A' - 10);
-				// We have 26 letters in the usual A-Z alphabet and we only need 22 of them plus 0-9.
-				// So avoid using letters C, E, I and O which are easily mistaken for G, F, 1 and 0.
-				if (c >= 'C')
-				{
-					++c;
-				}
-				if (c >= 'E')
-				{
-					++c;
-				}
-				if (c >= 'I')
-				{
-					++c;
-				}
-				if (c >= 'O')
-				{
-					++c;
-				}
-			}
-			*digitPtr++ = c;
+			*digitPtr++ = '-';
 		}
-		*digitPtr = 0;
-		MessageF(mtype, "Board ID: %s\n", digits);
+		const size_t index = (i * 5) / 32;
+		const size_t shift = (i * 5) % 32;
+		uint32_t val = uniqueId[index] >> shift;
+		if (shift > 32 - 5)
+		{
+			// We need some bits from the next dword too
+			val |= uniqueId[index + 1] << (32 - shift);
+		}
+		val &= 31;
+		char c;
+		if (val < 10)
+		{
+			c = val + '0';
+		}
+		else
+		{
+			c = val + ('A' - 10);
+			// We have 26 letters in the usual A-Z alphabet and we only need 22 of them plus 0-9.
+			// So avoid using letters C, E, I and O which are easily mistaken for G, F, 1 and 0.
+			if (c >= 'C')
+			{
+				++c;
+			}
+			if (c >= 'E')
+			{
+				++c;
+			}
+			if (c >= 'I')
+			{
+				++c;
+			}
+			if (c >= 'O')
+			{
+				++c;
+			}
+		}
+		*digitPtr++ = c;
 	}
+	*digitPtr = 0;
+	MessageF(mtype, "Board ID: %s\n", digits);
 }
 
 #endif
@@ -2124,7 +2113,7 @@ void Platform::PrintUniqueId(MessageType mtype)
 // Return diagnostic information
 void Platform::Diagnostics(MessageType mtype)
 {
-#if SAM4E && USE_CACHE
+#if USE_CACHE
 	// Get the cache statistics before we start messing around with the cache
 	const uint32_t cacheCount = cmcc_get_monitor_cnt(CMCC);
 #endif
@@ -2157,7 +2146,7 @@ void Platform::Diagnostics(MessageType mtype)
 #elif SAM3XA
 			(char *) 0x20070000;
 #else
-# error
+# error Unsupported processor
 #endif
 	const struct mallinfo mi = mallinfo();
 	MessageF(mtype, "Static ram used: %d\n", &_end - ramstart);
@@ -2171,8 +2160,9 @@ void Platform::Diagnostics(MessageType mtype)
 	// Show the up time and reason for the last reset
 	const uint32_t now = (uint32_t)(millis64()/1000u);		// get up time in seconds
 	const char* resetReasons[8] = { "power up", "backup", "watchdog", "software",
-#if SAM4E || SAM4S
-	// On the SAM4E a watchdog reset may be reported as a user reset because of the capacitor on the NRST pin
+#ifdef DUET_NG
+	// On the SAM4E a watchdog reset may be reported as a user reset because of the capacitor on the NRST pin.
+	// The SAM4S is the same but the Duet M has a diode in the reset circuit to avoid this problem.
 									"reset button or watchdog",
 #else
 									"reset button",
@@ -2223,7 +2213,8 @@ void Platform::Diagnostics(MessageType mtype)
 																: "Unknown";
 			if (srdBuf[slot].when != 0)
 			{
-				const struct tm * const timeInfo = gmtime(&srdBuf[slot].when);
+				const time_t when = (time_t)srdBuf[slot].when;
+				const struct tm * const timeInfo = gmtime(&when);
 				scratchString.printf("at %04u-%02u-%02u %02u:%02u",
 								timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday, timeInfo->tm_hour, timeInfo->tm_min);
 			}
@@ -2320,8 +2311,7 @@ void Platform::Diagnostics(MessageType mtype)
 		Message(mtype, "not set\n");
 	}
 
-#if SAM4E && USE_CACHE
-	// Get the cache statistics before we start messing around with the cache
+#if USE_CACHE
 	MessageF(mtype, "Cache data hit count %" PRIu32 "\n", cacheCount);
 #endif
 
@@ -2503,7 +2493,8 @@ bool Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, int d)
 	case (int)DiagnosticTestType::UnalignedMemoryAccess:	// do an unaligned memory access to test exception handling
 		deliberateError = true;
 		SCB->CCR |= SCB_CCR_UNALIGN_TRP_Msk;			// by default, unaligned memory accesses are allowed, so change that
-		(void)RepRap::ReadDword(reinterpret_cast<const char*>(dummy) + 1);	// call function in another module so it can't be optimised away
+		__DMB();										// make sure that instruction completes, don't allow prefetch
+		(void)*(reinterpret_cast<const volatile char*>(dummy) + 1);
 		break;
 
 	case (int)DiagnosticTestType::BusFault:
@@ -2514,9 +2505,9 @@ bool Platform::DiagnosticTest(GCodeBuffer& gb, const StringRef& reply, int d)
 		// I guess this can wait until we have the RTOS working though.
 		Message(WarningMessage, "There is no abort area on the SAME70");
 #elif SAM4E || SAM4S
-		(void)RepRap::ReadDword(reinterpret_cast<const char*>(0x20800000));
+		(void)*(reinterpret_cast<const volatile char*>(0x20800000));
 #elif SAM3XA
-		(void)RepRap::ReadDword(reinterpret_cast<const char*>(0x20200000));
+		(void)*(reinterpret_cast<const volatile char*>(0x20200000));
 #else
 # error
 #endif
@@ -2858,6 +2849,11 @@ bool Platform::WriteAxisLimits(FileStore *f, AxesBitmap axesProbed, const float 
 // If drive >= DRIVES then we are setting an individual motor direction
 void Platform::SetDirection(size_t drive, bool direction)
 {
+	const bool isSlowDriver = (GetDriversBitmap(drive) & GetSlowDriversBitmap()) != 0;
+	if (isSlowDriver)
+	{
+		while (GetInterruptClocks() - DDA::lastStepLowTime < GetSlowDriverDirHoldClocks()) { }
+	}
 	const size_t numAxes = reprap.GetGCodes().GetTotalAxes();
 	if (drive < numAxes)
 	{
@@ -2873,6 +2869,10 @@ void Platform::SetDirection(size_t drive, bool direction)
 	else if (drive < 2 * DRIVES)
 	{
 		SetDriverDirection(drive - DRIVES, direction);
+	}
+	if (isSlowDriver)
+	{
+		DDA::lastDirChangeTime = GetInterruptClocks();
 	}
 }
 
@@ -2995,7 +2995,7 @@ void Platform::SetDriverCurrent(size_t driver, float currentOrPercent, int code)
 
 #if HAS_SMART_DRIVERS
 		case 917:
-			motorStandstillCurrentFraction[driver] = 0.01 * currentOrPercent;
+			SmartDrivers::SetStandstillCurrentPercent(driver, currentOrPercent);
 			break;
 #endif
 		default:
@@ -3110,7 +3110,7 @@ float Platform::GetMotorCurrent(size_t drive, int code) const
 
 #if HAS_SMART_DRIVERS
 			case 917:
-				return motorStandstillCurrentFraction[driver] * 100.0;
+				return (driver < numSmartDrivers) ? SmartDrivers::GetStandstillCurrentPercent(driver) : 100.0;
 #endif
 			default:
 				break;
@@ -3236,18 +3236,18 @@ void Platform::SetEnableValue(size_t driver, int8_t eVal)
 #endif
 }
 
-void Platform::SetAxisDriversConfig(size_t drive, const AxisDriversConfig& config)
+void Platform::SetAxisDriversConfig(size_t axis, const AxisDriversConfig& config)
 {
-	axisDrivers[drive] = config;
+	axisDrivers[axis] = config;
 	uint32_t bitmap = 0;
 	for (size_t i = 0; i < config.numDrivers; ++i)
 	{
 		bitmap |= CalcDriverBitmap(config.driverNumbers[i]);
 #if HAS_SMART_DRIVERS
-		SmartDrivers::SetAxisNumber(config.driverNumbers[i], drive);
+		SmartDrivers::SetAxisNumber(config.driverNumbers[i], axis);
 #endif
 	}
-	driveDriverBits[drive] = bitmap;
+	driveDriverBits[axis] = bitmap;
 }
 
 // Map an extruder to a driver
@@ -3260,28 +3260,41 @@ void Platform::SetExtruderDriver(size_t extruder, uint8_t driver)
 	driveDriverBits[extruder + reprap.GetGCodes().GetTotalAxes()] = CalcDriverBitmap(driver);
 }
 
-void Platform::SetDriverStepTiming(size_t driver, float microseconds)
+void Platform::SetDriverStepTiming(size_t driver, const float microseconds[4])
 {
-	if (microseconds < minStepPulseTiming)
+	const uint32_t bitmap = CalcDriverBitmap(driver);
+	slowDriversBitmap &= ~bitmap;								// start by assuming this drive does not need extended timing
+	if (slowDriversBitmap == 0)
 	{
-		slowDrivers &= ~CalcDriverBitmap(driver);						// this drive does not need extended timing
-	}
-	else
-	{
-		const uint32_t clocks = (uint32_t)(((float)DDA::stepClockRate * microseconds * 0.000001) + 0.99);	// convert microseconds to step clocks, rounding up
-		if (clocks > slowDriverStepPulseClocks)
+		for (uint32_t& entry : slowDriverStepTimingClocks)
 		{
-			slowDriverStepPulseClocks = clocks;
+			entry = 0;											// reset all to zero if we have no known slow drivers
 		}
-		slowDrivers |= CalcDriverBitmap(driver);						// this drive does need extended timing
+	}
+
+	for (size_t i = 0; i < ARRAY_SIZE(slowDriverStepTimingClocks); ++i)
+	{
+		if (microseconds[i] > MinStepPulseTiming)
+		{
+			slowDriversBitmap |= CalcDriverBitmap(driver);		// this drive does need extended timing
+			const uint32_t clocks = (uint32_t)(((float)DDA::stepClockRate * microseconds[i] * 0.000001) + 0.99);	// convert microseconds to step clocks, rounding up
+			if (clocks > slowDriverStepTimingClocks[i])
+			{
+				slowDriverStepTimingClocks[i] = clocks;
+			}
+		}
 	}
 }
 
-float Platform::GetDriverStepTiming(size_t driver) const
+void Platform::GetDriverStepTiming(size_t driver, float microseconds[4]) const
 {
-	return ((slowDrivers & CalcDriverBitmap(driver)) != 0)
-			? (float)slowDriverStepPulseClocks * 1000000.0/(float)DDA::stepClockRate
-			: 0.0;
+	const bool isSlowDriver = ((slowDriversBitmap & CalcDriverBitmap(driver)) != 0);
+	for (size_t i = 0; i < 4; ++i)
+	{
+		microseconds[i] = (isSlowDriver)
+							? (float)slowDriverStepTimingClocks[i] * 1000000.0/(float)DDA::stepClockRate
+								: 0.0;
+	}
 }
 
 // Set or report the parameters for the specified fan
@@ -3304,7 +3317,7 @@ bool Platform::ConfigureFan(unsigned int mcode, int fanNum, GCodeBuffer& gb, con
 // Get current cooling fan speed on a scale between 0 and 1
 float Platform::GetFanValue(size_t fan) const
 {
-	return (fan < NUM_FANS) ? fans[fan].GetValue() : -1;
+	return (fan < NUM_FANS) ? fans[fan].GetConfiguredPwm() : -1;
 }
 
 // This is a bit of a compromise - old RepRaps used fan speeds in the range
@@ -3316,7 +3329,7 @@ void Platform::SetFanValue(size_t fan, float speed)
 {
 	if (fan < NUM_FANS)
 	{
-		fans[fan].SetValue(speed);
+		fans[fan].SetPwm(speed);
 	}
 }
 
@@ -3366,7 +3379,7 @@ void Platform::InitFans()
 	{
 #if defined(DUET_06_085)
 		// Fan 1 on the Duet 0.8.5 shares its control pin with heater 6. Set it full on to make sure the heater (if present) is off.
-		fans[1].SetValue(1.0);												// set it full on
+		fans[1].SetPwm(1.0);												// set it full on
 #else
 		// Set fan 1 to be thermostatic by default, monitoring all heaters except the default bed and chamber heaters
 		Fan::HeatersMonitoredBitmap bedAndChamberHeaterMask = 0;
@@ -3385,7 +3398,7 @@ void Platform::InitFans()
 			}
 		}
 		fans[1].SetHeatersMonitored(LowestNBits<Fan::HeatersMonitoredBitmap>(Heaters) & ~bedAndChamberHeaterMask);
-		fans[1].SetValue(1.0);												// set it full on
+		fans[1].SetPwm(1.0);												// set it full on
 #endif
 	}
 
@@ -4012,6 +4025,7 @@ bool Platform::IsDuetWiFi() const
 #endif
 
 // User I/O and servo support
+// Translate a logical pin to a firmware pin and also return whether the output of that pin is normally inverted
 bool Platform::GetFirmwarePin(LogicalPin logicalPin, PinAccess access, Pin& firmwarePin, bool& invert)
 {
 	firmwarePin = NoPin;										// assume failure
@@ -4106,9 +4120,9 @@ bool Platform::GetFirmwarePin(LogicalPin logicalPin, PinAccess access, Pin& firm
 	return false;
 }
 
-bool Platform::SetExtrusionAncilliaryPwmPin(LogicalPin logicalPin)
+bool Platform::SetExtrusionAncilliaryPwmPin(LogicalPin logicalPin, bool invert)
 {
-	return extrusionAncilliaryPwmPort.Set(logicalPin, PinAccess::pwm);
+	return extrusionAncilliaryPwmPort.Set(logicalPin, PinAccess::pwm, invert);
 }
 
 // CNC and laser support
@@ -4131,21 +4145,21 @@ void Platform::SetLaserPwm(float pwm)
 	laserPort.WriteAnalog(pwm);
 }
 
-bool Platform::SetSpindlePins(LogicalPin lpf, LogicalPin lpr)
+bool Platform::SetSpindlePins(LogicalPin lpf, LogicalPin lpr, bool invert)
 {
-	const bool ok1 = spindleForwardPort.Set(lpf, PinAccess::pwm);
+	const bool ok1 = spindleForwardPort.Set(lpf, PinAccess::pwm, invert);
 	if (lpr == NoLogicalPin)
 	{
 		spindleReversePort.Clear();
 		return ok1;
 	}
-	const bool ok2 = spindleReversePort.Set(lpr, PinAccess::pwm);
+	const bool ok2 = spindleReversePort.Set(lpr, PinAccess::pwm, invert);
 	return ok1 && ok2;
 }
 
-void Platform::GetSpindlePins(LogicalPin& lpf, LogicalPin& lpr) const
+void Platform::GetSpindlePins(LogicalPin& lpf, LogicalPin& lpr, bool& invert) const
 {
-	lpf = spindleForwardPort.GetLogicalPin();
+	lpf = spindleForwardPort.GetLogicalPin(invert);
 	lpr = spindleReversePort.GetLogicalPin();
 }
 
@@ -4155,9 +4169,9 @@ void Platform::SetSpindlePwmFrequency(float freq)
 	spindleReversePort.SetFrequency(freq);
 }
 
-bool Platform::SetLaserPin(LogicalPin lp)
+bool Platform::SetLaserPin(LogicalPin lp, bool invert)
 {
-	return laserPort.Set(lp, PinAccess::pwm);
+	return laserPort.Set(lp, PinAccess::pwm, invert);
 }
 
 void Platform::SetLaserPwmFrequency(float freq)
@@ -4328,7 +4342,7 @@ bool Platform::ConfigureStallDetection(GCodeBuffer& gb, const StringRef& reply)
 	if (gb.Seen('F'))
 	{
 		seen = true;
-		const int sgFilter = (gb.GetIValue() == 1);
+		const bool sgFilter = (gb.GetIValue() == 1);
 		for (size_t drive = 0; drive < numSmartDrivers; ++drive)
 		{
 			if (IsBitSet(drivers, drive))
@@ -4466,6 +4480,17 @@ void Platform::InitI2c()
 	}
 #endif
 }
+
+#if SAM4E || SAM4S || SAME70
+
+// Get a pseudo-random number
+uint32_t Platform::Random()
+{
+	const uint32_t clocks = GetInterruptClocks();
+	return clocks ^ uniqueId[0] ^ uniqueId[1] ^ uniqueId[2] ^ uniqueId[3];
+}
+
+#endif
 
 // Step pulse timer interrupt
 void STEP_TC_HANDLER() __attribute__ ((hot));

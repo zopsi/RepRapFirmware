@@ -40,7 +40,7 @@ void LaserFilamentMonitor::Reset()
 // Configure this sensor, returning true if error and setting 'seen' if we processed any configuration parameters
 bool LaserFilamentMonitor::Configure(GCodeBuffer& gb, const StringRef& reply, bool& seen)
 {
-	if (ConfigurePin(gb, reply, CHANGE, seen))
+	if (ConfigurePin(gb, reply, INTERRUPT_MODE_CHANGE, seen))
 	{
 		return true;
 	}
@@ -195,8 +195,8 @@ void LaserFilamentMonitor::HandleIncomingData()
 
 // Call the following at intervals to check the status. This is only called when extrusion is in progress or imminent.
 // 'filamentConsumed' is the net amount of extrusion since the last call to this function.
-// 'hadNonPrintingMove' is called if filamentConsumed includes extruder movement from non-printing moves.
-// 'fromIsr' is true if this measurement was taken dat the end of the ISR because a potential start bit was seen
+// 'hadNonPrintingMove' is true if filamentConsumed includes extruder movement from non-printing moves.
+// 'fromIsr' is true if this measurement was taken at the end of the ISR because a potential start bit was seen
 FilamentSensorStatus LaserFilamentMonitor::Check(bool full, bool hadNonPrintingMove, bool fromIsr, float filamentConsumed)
 {
 	// 1. Update the extrusion commanded and whether we have had an extruding but non-printing move
