@@ -256,7 +256,7 @@ $(OUTPUT_ELF): $(addprefix $(OUTPUT_PATH)/, $(C_OBJ)) $(addprefix $(OUTPUT_PATH)
 	@mkdir -p $(OUTPUT_BIN)
 	@"$(CC)" $(LDFLAGS) -o "$(OUTPUT_BIN)/$@" -mthumb -Wl,--cref -Wl,--check-sections -Wl,--gc-sections -Wl,--entry=Reset_Handler -Wl,--unresolved-symbols=report-all -Wl,--warn-common -Wl,--warn-section-align -Wl,--warn-unresolved-symbols -Wl,--start-group "$(CORENG_PATH)/variants/duetNG/build_gcc/release_duetNG/syscalls.o" $^ $(LIBS) -Wl,--end-group -lm
 	@"$(OC)" -O binary "$(OUTPUT_BIN)/$@" "$(OUTPUT_BIN)/$(BINNAME).bin"
-	@$(PROJECT_BASE_PATH)/tools/crc32appender/linux-x86_64/crc32appender "$(OUTPUT_BIN)/$(BINNAME).bin"
+	@$(PROJECT_BASE_PATH)/Tools/crc32appender/linux-x86_64/crc32appender "$(OUTPUT_BIN)/$(BINNAME).bin"
 #	@"$(NM)" "$(OUTPUT_BIN)/$@" > "$(OUTPUT_BIN)/$@.txt"
 
 

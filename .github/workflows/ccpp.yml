@@ -57,9 +57,10 @@ jobs:
         ls -la
         cd RepRapFirmware
     - name: make
-      working-directory: ./variants/duetNG/build_gcc 
+      working-directory: variants/duetNG/build_gcc 
       run: |
         echo "ARM Cross Compiler: $ARM_GCC_TOOLCHAIN"
+        echo "current dir: ${pwd}"
         make
     - name: upload libraries
       uses: actions/upload-artifact@v1
