@@ -104,12 +104,12 @@ endif
 #-------------------------------------------------------------------------------
 
 include $(TOOLCHAIN).mk
-CFLAGS += -c -c -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -ffunction-sections -fdata-sections -nostdlib -Wundef -Wdouble-promotion -fsingle-precision-constant "-Wa,-ahl=$*.s"
+CFLAGS += -c -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -ffunction-sections -fdata-sections -nostdlib -Wundef -Wdouble-promotion -fsingle-precision-constant "-Wa,-ahl=$*.s"
 CFLAGS += -std=gnu99
 CFLAGS += -DRTOS
 CFLAGS += -DDUET_NG
 
-CPPFLAGS += -c -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -ffunction-sections -fdata-sections -fno-threadsafe-statics -fno-rtti -fno-exceptions -nostdlib -Wundef -Wdouble-promotion -fsingle-precision-constant "-Wa,-ahl=$*.s"
+CPPFLAGS += -c -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -ffunction-sections -fdata-sections -fno-threadsafe-statics -fno-rtti -fexceptions -nostdlib -Wundef -Wdouble-promotion -fsingle-precision-constant "-Wa,-ahl=$*.s"
 CPPFLAGS += -std=gnu++17
 CPPFLAGS += -DRTOS
 CPPFLAGS += -DDUET_NG
