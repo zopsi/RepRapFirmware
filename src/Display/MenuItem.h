@@ -98,8 +98,8 @@ private:
 class TextMenuItem final : public MenuItem
 {
 public:
-	void* operator new(size_t sz) { return Allocate<TextMenuItem>(); }
-	void operator delete(void* p) { Release<TextMenuItem>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<TextMenuItem>(); }
+	void operator delete(void* p) { FreelistManager::Release<TextMenuItem>(p); }
 
 	TextMenuItem(PixelNumber r, PixelNumber c, PixelNumber w, Alignment a, FontNumber fn, Visibility vis, const char *t);
 	void Draw(Lcd7920& lcd, PixelNumber maxWidth, bool highlight, PixelNumber tOffset) override;
@@ -115,8 +115,8 @@ private:
 class ButtonMenuItem final : public MenuItem
 {
 public:
-	void* operator new(size_t sz) { return Allocate<ButtonMenuItem>(); }
-	void operator delete(void* p) { Release<ButtonMenuItem>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<ButtonMenuItem>(); }
+	void operator delete(void* p) { FreelistManager::Release<ButtonMenuItem>(p); }
 
 	ButtonMenuItem(PixelNumber r, PixelNumber c, PixelNumber w, FontNumber fn, Visibility vis, const char *t, const char *cmd, const char *acFile);
 	void Draw(Lcd7920& lcd, PixelNumber maxWidth, bool highlight, PixelNumber tOffset) override;
@@ -137,8 +137,8 @@ private:
 class ValueMenuItem final : public MenuItem
 {
 public:
-	void* operator new(size_t sz) { return Allocate<ValueMenuItem>(); }
-	void operator delete(void* p) { Release<ValueMenuItem>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<ValueMenuItem>(); }
+	void operator delete(void* p) { FreelistManager::Release<ValueMenuItem>(p); }
 
 	ValueMenuItem(PixelNumber r, PixelNumber c, PixelNumber w, Alignment a, FontNumber fn, Visibility vis, bool adj, unsigned int v, unsigned int d);
 	void Draw(Lcd7920& lcd, PixelNumber maxWidth, bool highlight, PixelNumber tOffset) override;
@@ -184,8 +184,8 @@ private:
 class FilesMenuItem final : public MenuItem
 {
 public:
-	void* operator new(size_t sz) { return Allocate<FilesMenuItem>(); }
-	void operator delete(void* p) { Release<FilesMenuItem>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<FilesMenuItem>(); }
+	void operator delete(void* p) { FreelistManager::Release<FilesMenuItem>(p); }
 
 	FilesMenuItem(PixelNumber r, PixelNumber c, PixelNumber w, FontNumber fn, Visibility vis, const char *cmd, const char *dir, const char *acFile, unsigned int nf);
 	void Draw(Lcd7920& lcd, PixelNumber rightMargin, bool highlight, PixelNumber tOffset) override;
@@ -231,8 +231,8 @@ private:
 class ImageMenuItem final : public MenuItem
 {
 public:
-	void* operator new(size_t sz) { return Allocate<ImageMenuItem>(); }
-	void operator delete(void* p) { Release<ImageMenuItem>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<ImageMenuItem>(); }
+	void operator delete(void* p) { FreelistManager::Release<ImageMenuItem>(p); }
 
 	ImageMenuItem(PixelNumber r, PixelNumber c, Visibility vis, const char *pFileName);
 

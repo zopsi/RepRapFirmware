@@ -91,8 +91,8 @@ protected:
 class MotorStallZProbe final : public ZProbe
 {
 public:
-	void* operator new(size_t sz) { return Allocate<MotorStallZProbe>(); }
-	void operator delete(void* p) { Release<MotorStallZProbe>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<MotorStallZProbe>(); }
+	void operator delete(void* p) { FreelistManager::Release<MotorStallZProbe>(p); }
 
 	MotorStallZProbe(unsigned int num) : ZProbe(num, ZProbeType::zMotorStall) { }
 	~MotorStallZProbe() override { }
@@ -108,8 +108,8 @@ private:
 class DummyZProbe final : public ZProbe
 {
 public:
-	void* operator new(size_t sz) { return Allocate<DummyZProbe>(); }
-	void operator delete(void* p) { Release<DummyZProbe>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<DummyZProbe>(); }
+	void operator delete(void* p) { FreelistManager::Release<DummyZProbe>(p); }
 
 	DummyZProbe(unsigned int num) : ZProbe(num, ZProbeType::none) { }
 	~DummyZProbe() override { }

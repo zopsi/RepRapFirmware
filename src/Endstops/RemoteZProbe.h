@@ -15,8 +15,8 @@
 class RemoteZProbe final : public ZProbe
 {
 public:
-	void* operator new(size_t sz) { return Allocate<RemoteZProbe>(); }
-	void operator delete(void* p) { Release<RemoteZProbe>(p); }
+	void* operator new(size_t sz) { return FreelistManager::Allocate<RemoteZProbe>(); }
+	void operator delete(void* p) { FreelistManager::Release<RemoteZProbe>(p); }
 
 	RemoteZProbe(unsigned int num, CanAddress bn, ZProbeType p_type) : ZProbe(num, p_type), boardAddress(bn) { }
 	~RemoteZProbe() override;
