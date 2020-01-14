@@ -41,7 +41,7 @@ jobs:
         echo "Finished FreeRTOS"
         cd ../../../..
         git clone https://github.com/timschneider/RRFLibraries.git
-        cd FreeRTOS
+        cd RRFLibraries
         git checkout origin/dev
         cd ./variants/duetNG/build_gcc
         echo "Make RRFLibraries"
