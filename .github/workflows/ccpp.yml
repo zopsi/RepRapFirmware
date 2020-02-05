@@ -1,4 +1,3 @@
-CLion  
 name: C/C++ CI
 
 on: [push]
