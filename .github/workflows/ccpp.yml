@@ -5,8 +5,9 @@ on: [push]
 jobs:
   build:
 
-    runs-on: ubuntu-latest
-    
+    #runs-on: ubuntu-latest
+    runs-on: self-hosted
+
     steps:
     - uses: actions/checkout@v1
     - name: setup cross build environment
@@ -28,7 +29,7 @@ jobs:
         git checkout origin/dev
         cd ./variants/duetNG/build_gcc
         echo "Make CoreNG"
-        make >/dev/null 2>&1
+        make
         echo "Finished CoreNG"
         cd ../../../..
         git clone https://github.com/zopsi/FreeRTOS.git
@@ -37,7 +38,7 @@ jobs:
         git status
         cd ./variants/duetNG/build_gcc
         echo "Make FreeRTOS"
-        make >/dev/null 2>&1
+        make
         echo "Finished FreeRTOS"
         cd ../../../..
         git clone https://github.com/zopsi/RRFLibraries.git
@@ -45,7 +46,7 @@ jobs:
         git checkout origin/dev
         cd ./variants/duetNG/build_gcc
         echo "Make RRFLibraries"
-        make >/dev/null 2>&1
+        make
         echo "Finished RRFLibraries"
         cd ../../../..
         git clone https://github.com/dc42/DuetWiFiSocketServer.git
@@ -59,6 +60,7 @@ jobs:
     - name: make
       working-directory: variants/duetNG/build_gcc 
       run: |
+        echo $(ls -al "${pwd}")
         echo "ARM Cross Compiler: $ARM_GCC_TOOLCHAIN"
         echo "current dir: ${pwd}"
         make
